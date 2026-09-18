@@ -1,0 +1,209 @@
+// Draft schema — landed here in Phase 1 as an architecture decision, wired up
+// (migrations run, client used in routes) starting Phase 2.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [vector]
+}
+
+model User {
+  id          String       @id // Clerk user id
+  email       String       @unique
+  name        String?
+  createdAt   DateTime     @default(now())
+  workspaces  Workspace[]
+  notes       Note[]
+  savedInsights SavedInsight[]
+  settings    UserSettings?
+}
+
+model UserSettings {
+  id        String  @id @default(cuid())
+  userId    String  @unique
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme     String  @default("system") // light | dark | system
+}
+
+model Workspace {
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  ownerId     String
+  owner       User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  documents   Document[]
+  collections Collection[]
+  conversations Conversation[]
+  researchAnalyses ResearchAnalysis[]
+  createdAt   DateTime   @default(now())
+
+  @@index([ownerId])
+}
+
+model Document {
+  id           String          @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title        String
+  authors      String[]
+  year         Int?
+  abstract     String?
+  keywords     String[]
+  fileUrl      String // Vercel Blob URL
+  fileName     String
+  fileSizeBytes Int
+  status       ProcessingStatus @default(UPLOADING)
+  pageCount    Int?
+  processingError String?
+  // AI-extracted, best-effort — see DocumentAnalysisService
+  overview        String?
+  researchProblem String?
+  methodology     String?
+  dataset         String?
+  results         String?
+  limitations     String?
+  futureWork      String?
+  summaryText     String? // populated for "brief"/"detailed" modes; the fields
+  summaryMode     String? // above are populated for "structured" mode instead
+  pages        DocumentPage[]
+  chunks       DocumentChunk[]
+  collections  CollectionDocument[]
+  citations    Citation[]
+  notes        Note[]
+  createdAt    DateTime        @default(now())
+
+  @@index([workspaceId])
+}
+
+enum ProcessingStatus {
+  UPLOADING
+  EXTRACTING
+  PROCESSING
+  INDEXING
+  READY
+  FAILED
+}
+
+model DocumentPage {
+  id          String   @id @default(cuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  pageNumber  Int
+  text        String
+
+  @@unique([documentId, pageNumber])
+}
+
+model DocumentChunk {
+  id          String                      @id @default(cuid())
+  documentId  String
+  document    Document                    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  pageNumber  Int
+  text        String
+  embedding   Unsupported("vector(768)")? // text-embedding-004 dimension
+  createdAt   DateTime                    @default(now())
+
+  @@index([documentId])
+}
+
+model Collection {
+  id          String               @id @default(cuid())
+  workspaceId String
+  workspace   Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  documents   CollectionDocument[]
+  createdAt   DateTime             @default(now())
+}
+
+model CollectionDocument {
+  collectionId String
+  documentId   String
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  document     Document   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([collectionId, documentId])
+}
+
+model Conversation {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title       String?
+  documentIds String[]  // papers in scope for this thread (single or multi-paper)
+  messages    Message[]
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String // user | assistant
+  content        String
+  citations      Citation[]
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+}
+
+model Citation {
+  id          String    @id @default(cuid())
+  documentId  String
+  document    Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  messageId   String?
+  message     Message?  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  pageNumber  Int
+  excerpt     String
+
+  @@index([messageId])
+}
+
+model Note {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  pageNumber Int?
+  content    String
+  tags       String[]
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([documentId])
+}
+
+model SavedInsight {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String // ai_response | research_gap | citation | section
+  content   String
+  sourceRef String? // e.g. documentId:page
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Comparisons (Phase 7), and research-gap / literature-review results
+// (Phase 8) all land here — one generic, kind-tagged store rather than a
+// table per analysis type.
+model ResearchAnalysis {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  kind        String // comparison | research_gap | literature_review
+  documentIds String[]
+  content     Json
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId])
+}
