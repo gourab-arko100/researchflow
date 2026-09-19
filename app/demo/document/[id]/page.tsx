@@ -3,6 +3,9 @@ import Link from "next/link";
 import { getDemoDocument } from "@/lib/actions/demo";
 import { DemoDocumentView } from "@/components/demo/demo-document-view";
 
+// Same reasoning as app/demo/page.tsx — must not be statically prerendered.
+export const dynamic = "force-dynamic";
+
 export default async function DemoDocumentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const document = await getDemoDocument(id);

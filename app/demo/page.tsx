@@ -4,6 +4,10 @@ import { DemoChat } from "@/components/demo/demo-chat";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+// Must be dynamic, not statically prerendered: this page hits the live
+// database on every load (checking whether the demo workspace exists yet,
+// self-seeding if not), which has no meaningful behavior at build time.
+export const dynamic = "force-dynamic";
 // Public, unauthenticated — seeds itself on first visit (see lib/demo/seed.ts)
 // and runs entirely on the Demo providers, never touching GEMINI_API_KEY.
 export default async function DemoPage() {
