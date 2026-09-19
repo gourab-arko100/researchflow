@@ -30,7 +30,7 @@ describe("DemoEmbeddingService", () => {
   });
 
   it("gives more similar vectors to texts sharing vocabulary than to unrelated text", async () => {
-    const cosine = (a: number[], b: number[]) => a.reduce((sum, v, i) => sum + v * b[i], 0);
+    const cosine = (a: number[], b: number[]) => a.reduce((sum, v, i) => sum + v * (b[i] ?? 0), 0);
 
     const base = await service.embed("speech recognition dataset methodology results");
     const related = await service.embed("speech recognition methodology and dataset details");

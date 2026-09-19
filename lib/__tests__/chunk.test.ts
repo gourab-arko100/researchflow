@@ -36,7 +36,7 @@ describe("chunkPages", () => {
       { pageNumber: 3, text: "Real content here." },
     ]);
     expect(chunks).toHaveLength(1);
-    expect(chunks[0].pageNumber).toBe(3);
+    expect(chunks[0]!.pageNumber).toBe(3);
   });
 
   it("preserves page order across multiple pages", () => {
