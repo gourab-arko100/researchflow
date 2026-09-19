@@ -256,10 +256,13 @@ Targets Vercel.
    deployed app runs on Demo providers for every authenticated user too, not
    just `/demo`).
 6. **Deploy.** Vercel runs `npm install` and `next build` automatically —
-   there's no separate migration step to wire in; `prisma generate` runs as
-   part of `npm install` via Prisma's postinstall hook, and the database schema
-   itself should already be pushed from local setup (`npm run db:push`) before
-   the first deploy, since this project doesn't run migrations at build time.
+   there's no separate migration step to wire in; `package.json` has an
+   explicit `"postinstall": "prisma generate"` script (added deliberately —
+   don't rely on `@prisma/client`'s own automatic postinstall hook alone,
+   since it isn't always reliable across every install environment) and the
+   database schema itself should already be pushed from local setup
+   (`npm run db:push`) before the first deploy, since this project doesn't
+   run migrations at build time.
 7. **Verify**: visit the deployed URL, confirm `/demo` loads and self-seeds,
    sign up for a real account, upload a paper, and confirm it reaches `Ready`.
 
@@ -267,6 +270,16 @@ Targets Vercel.
 per cold start on Vercel's default serverless runtime — it still helps against
 casual abuse within a warm instance, but isn't a hard guarantee at scale. See
 the Security section above.
+
+**Static generation caveat**: `app/demo/page.tsx` and
+`app/demo/document/[id]/page.tsx` both export `const dynamic = "force-dynamic"`.
+Without it, Next.js tries to statically prerender these pages at *build* time —
+but they hit the live database on every load (checking whether the demo
+workspace exists yet, self-seeding if not), which has no meaningful behavior
+during a build and previously caused the production build itself to fail with
+a Prisma connection error. Any future page that reads from the database
+without an auth check ahead of it (which otherwise forces dynamic rendering
+automatically, via Clerk's use of cookies) needs the same treatment.
 
 ## Future improvements
 
