@@ -3,6 +3,7 @@ import { getDemoWorkspace } from "@/lib/actions/demo";
 import { DemoChat } from "@/components/demo/demo-chat";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { Document } from "@prisma/client";
 
 // Must be dynamic, not statically prerendered: this page hits the live
 // database on every load (checking whether the demo workspace exists yet,
@@ -29,13 +30,13 @@ export default async function DemoPage() {
       <p className="mt-2 max-w-lg font-sans text-sm text-ink-soft dark:text-paper/70">{workspace.description}</p>
 
       <div className="mt-10">
-        <DemoChat documentIds={workspace.documents.map((d) => d.id)} />
+        <DemoChat documentIds={workspace.documents.map((d: Document) => d.id)} />
       </div>
 
       <div className="mt-10">
         <h2 className="font-display text-lg">Papers in this workspace</h2>
         <ul className="mt-4 divide-y divide-hairline border-t border-hairline dark:divide-hairline-dark dark:border-hairline-dark">
-          {workspace.documents.map((doc) => (
+          {workspace.documents.map((doc: Document) => (
             <li key={doc.id}>
               <Link href={`/demo/document/${doc.id}`} className="block py-4 hover:opacity-70">
                 <p className="font-display text-base">{doc.title}</p>
