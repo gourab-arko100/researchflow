@@ -67,10 +67,13 @@ export async function processDocument(documentId: string): Promise<void> {
 
     const embeddingService = getEmbeddingService();
     const embeddings = await embeddingService.embedBatch(chunks.map((c) => c.text));
+    if (embeddings.length !== chunks.length) {
+      throw new Error(`Embedding count (${embeddings.length}) didn't match chunk count (${chunks.length})`);
+    }
 
     await insertChunkEmbeddings(
       documentId,
-      chunks.map((c, i) => ({ pageNumber: c.pageNumber, text: c.text, embedding: embeddings[i] }))
+      chunks.map((c, i) => ({ pageNumber: c.pageNumber, text: c.text, embedding: embeddings[i]! }))
     );
 
     await db.document.update({

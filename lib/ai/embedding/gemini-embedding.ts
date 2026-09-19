@@ -12,7 +12,7 @@ export class GeminiEmbeddingService implements EmbeddingService {
 
   async embed(text: string): Promise<number[]> {
     const [result] = await this.embedBatch([text]);
-    return result;
+    return result ?? [];
   }
 
   async embedBatch(texts: string[]): Promise<number[][]> {

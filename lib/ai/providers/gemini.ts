@@ -51,7 +51,12 @@ Answer:`;
         .map((m) => Number(m[1]) - 1)
         .filter((i) => i >= 0 && i < chunks.length)
     );
-    const citedChunks = citedIndices.size > 0 ? [...citedIndices].map((i) => chunks[i]) : chunks;
+    // citedIndices is already filtered to valid array bounds above, so this
+    // access is safe — the explicit filter just satisfies noUncheckedIndexedAccess.
+    const citedChunks =
+      citedIndices.size > 0
+        ? [...citedIndices].map((i) => chunks[i]).filter((c): c is RetrievedChunk => c !== undefined)
+        : chunks;
 
     // Replace [Source N] with a human-readable "[Title, p. N]" label for display.
     const answer = rawAnswer.replace(/\[Source (\d+)\]/g, (match, numStr: string) => {
