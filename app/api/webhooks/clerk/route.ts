@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { Webhook } from "svix";
+import { del } from "@vercel/blob";
 import type { WebhookEvent } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 
@@ -59,6 +60,16 @@ export async function POST(req: Request) {
     case "user.deleted": {
       const id = event.data.id;
       if (id) {
+        // Delete the user's uploaded files from Blob storage too — otherwise
+        // their papers would stay online after the account is gone.
+        const docs = await db.document.findMany({
+          where: { workspace: { ownerId: id } },
+          select: { fileUrl: true },
+        });
+        const urls = docs.map((d) => d.fileUrl).filter((u) => u.startsWith("https://"));
+        if (urls.length > 0) {
+          await del(urls).catch((err) => console.error("Clerk webhook: blob cleanup failed", err));
+        }
         await db.user.delete({ where: { id } }).catch(() => {
           // already gone — fine
         });

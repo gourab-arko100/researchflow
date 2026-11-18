@@ -8,12 +8,20 @@ import { getAIService, getEmbeddingService } from "@/lib/ai";
 import { searchChunks } from "@/lib/ai/vector";
 import { assertRateLimit } from "@/lib/rate-limit";
 import type { AIAnswer } from "@/lib/ai/types";
+import { assertId, assertIdList, assertText } from "@/lib/validations";
 
 const MAX_MESSAGE_LENGTH = 4000;
 
 export async function createConversation(workspaceId: string, documentIds: string[]) {
   const user = await getOrCreateCurrentUser();
   if (!user) redirect("/sign-in");
+
+  try {
+    assertId(workspaceId, "workspace");
+    documentIds = assertIdList(documentIds, 20, "papers");
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Invalid selection" };
+  }
 
   if (documentIds.length === 0) {
     return { error: "Select at least one paper to chat with" };
@@ -46,11 +54,10 @@ export async function sendMessage(
   const user = await getOrCreateCurrentUser();
   if (!user) throw new Error("Not signed in");
 
-  const trimmed = content.trim();
-  if (!trimmed) throw new Error("Message is empty");
-  if (trimmed.length > MAX_MESSAGE_LENGTH) throw new Error(`Keep messages under ${MAX_MESSAGE_LENGTH} characters`);
+  assertId(conversationId, "conversation");
+  const trimmed = assertText(content, MAX_MESSAGE_LENGTH, "message");
 
-  assertRateLimit(`chat:${user.id}`, 20, 5 * 60 * 1000); // 20 messages / 5 min
+  await assertRateLimit(`chat:${user.id}`, 20, 5 * 60 * 1000); // 20 messages / 5 min
 
   const conversation = await db.conversation.findFirst({
     where: { id: conversationId, workspace: { ownerId: user.id } },
@@ -72,8 +79,14 @@ export async function sendMessage(
   const embeddingService = getEmbeddingService();
   const queryEmbedding = await embeddingService.embed(trimmed);
 
+  // Re-check ownership of the papers at query time (defence in depth).
+  const ownedDocs = await db.document.findMany({
+    where: { id: { in: conversation.documentIds }, workspace: { ownerId: user.id } },
+    select: { id: true },
+  });
+
   const chunks = await searchChunks({
-    documentIds: conversation.documentIds,
+    documentIds: ownedDocs.map((d) => d.id),
     queryEmbedding,
     limit: 8, // a bit wider than the single-document quick-ask, since this can span multiple papers
   });
@@ -107,6 +120,7 @@ export async function deleteConversation(conversationId: string) {
   const user = await getOrCreateCurrentUser();
   if (!user) throw new Error("Not signed in");
 
+  assertId(conversationId, "conversation");
   const conversation = await db.conversation.findFirst({
     where: { id: conversationId, workspace: { ownerId: user.id } },
     select: { id: true, workspaceId: true },

@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { getOrCreateCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { assertRateLimit } from "@/lib/rate-limit";
+import { assertId, assertPageNumber, assertTags, assertText } from "@/lib/validations";
 
 const MAX_NOTE_LENGTH = 5000;
 
@@ -10,9 +12,11 @@ export async function createNote(documentId: string, pageNumber: number | null, 
   const user = await getOrCreateCurrentUser();
   if (!user) throw new Error("Not signed in");
 
-  const trimmed = content.trim();
-  if (!trimmed) throw new Error("Note is empty");
-  if (trimmed.length > MAX_NOTE_LENGTH) throw new Error(`Keep notes under ${MAX_NOTE_LENGTH} characters`);
+  assertId(documentId, "document");
+  const trimmed = assertText(content, MAX_NOTE_LENGTH, "note");
+  const safeTags = assertTags(tags);
+  const safePage = assertPageNumber(pageNumber);
+  await assertRateLimit(`notes:${user.id}`, 60, 5 * 60 * 1000);
 
   const document = await db.document.findFirst({
     where: { id: documentId, workspace: { ownerId: user.id } },
@@ -21,7 +25,7 @@ export async function createNote(documentId: string, pageNumber: number | null, 
   if (!document) throw new Error("Document not found");
 
   const note = await db.note.create({
-    data: { userId: user.id, documentId, pageNumber: pageNumber ?? undefined, content: trimmed, tags },
+    data: { userId: user.id, documentId, pageNumber: safePage ?? undefined, content: trimmed, tags: safeTags },
   });
 
   revalidatePath(`/document/${documentId}`);
@@ -33,10 +37,15 @@ export async function updateNote(noteId: string, content: string, tags: string[]
   const user = await getOrCreateCurrentUser();
   if (!user) throw new Error("Not signed in");
 
+  assertId(noteId, "note");
+  const trimmed = assertText(content, MAX_NOTE_LENGTH, "note");
+  const safeTags = assertTags(tags);
+  await assertRateLimit(`notes:${user.id}`, 60, 5 * 60 * 1000);
+
   const note = await db.note.findFirst({ where: { id: noteId, userId: user.id } });
   if (!note) throw new Error("Note not found");
 
-  await db.note.update({ where: { id: noteId }, data: { content: content.trim(), tags } });
+  await db.note.update({ where: { id: noteId }, data: { content: trimmed, tags: safeTags } });
   revalidatePath("/notes");
   if (note.documentId) revalidatePath(`/document/${note.documentId}`);
 }

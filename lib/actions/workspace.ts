@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { del } from "@vercel/blob";
 import { getOrCreateCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { createWorkspaceSchema } from "@/lib/validations";
+import { assertRateLimit } from "@/lib/rate-limit";
+import { MAX_WORKSPACES_PER_USER, assertId, createWorkspaceSchema } from "@/lib/validations";
 
 export async function createWorkspace(formData: FormData) {
   const user = await getOrCreateCurrentUser();
@@ -18,6 +19,16 @@ export async function createWorkspace(formData: FormData) {
 
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid workspace" };
+  }
+
+  try {
+    await assertRateLimit(`workspace:${user.id}`, 20, 60 * 60 * 1000);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Too many requests" };
+  }
+  const workspaceCount = await db.workspace.count({ where: { ownerId: user.id } });
+  if (workspaceCount >= MAX_WORKSPACES_PER_USER) {
+    return { error: `You can have at most ${MAX_WORKSPACES_PER_USER} workspaces` };
   }
 
   const workspace = await db.workspace.create({
@@ -35,6 +46,7 @@ export async function createWorkspace(formData: FormData) {
 export async function deleteWorkspace(workspaceId: string) {
   const user = await getOrCreateCurrentUser();
   if (!user) redirect("/sign-in");
+  assertId(workspaceId, "workspace");
 
   const workspace = await db.workspace.findFirst({
     where: { id: workspaceId, ownerId: user.id },

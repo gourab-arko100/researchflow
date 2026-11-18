@@ -27,7 +27,7 @@ export default async function ChatThreadPage({
   if (!conversation) notFound();
 
   const papers = await db.document.findMany({
-    where: { id: { in: conversation.documentIds } },
+    where: { id: { in: conversation.documentIds }, workspace: { ownerId: user.id } },
     select: { id: true, title: true },
   });
 

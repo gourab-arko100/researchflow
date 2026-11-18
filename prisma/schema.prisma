@@ -207,3 +207,11 @@ model ResearchAnalysis {
 
   @@index([workspaceId])
 }
+
+// Shared rate-limit counters (lib/rate-limit.ts). Works across every Vercel
+// serverless instance, unlike an in-memory Map.
+model RateLimit {
+  key     String @id
+  count   Int
+  resetAt BigInt // epoch milliseconds
+}

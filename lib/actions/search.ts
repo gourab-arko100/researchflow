@@ -2,6 +2,7 @@
 
 import { getOrCreateCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { assertRateLimit } from "@/lib/rate-limit";
 
 export type SearchResult = {
   kind: "paper" | "page" | "note" | "summary";
@@ -19,8 +20,13 @@ export async function globalSearch(query: string): Promise<SearchResult[]> {
   const user = await getOrCreateCurrentUser();
   if (!user) return [];
 
+  if (typeof query !== "string") return [];
   const q = query.trim();
   if (q.length < 2) return [];
+  if (q.length > 200) throw new Error("Search is too long — keep it under 200 characters");
+
+  // Full-text scans are the heaviest DB queries in the app; cap them.
+  await assertRateLimit(`search:${user.id}`, 30, 60 * 1000);
 
   const results: SearchResult[] = [];
 

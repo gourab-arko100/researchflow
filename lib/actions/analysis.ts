@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { getDocumentAnalysisService } from "@/lib/ai";
 import type { LitReviewTheme, StructuredSummary } from "@/lib/ai/types";
 import { assertRateLimit } from "@/lib/rate-limit";
+import { assertId, assertIdList, assertText } from "@/lib/validations";
 
 function hasCachedSummary(doc: {
   researchProblem: string | null;
@@ -21,6 +22,8 @@ function hasCachedSummary(doc: {
 export async function getOrGenerateSummary(documentId: string, force = false): Promise<StructuredSummary> {
   const user = await getOrCreateCurrentUser();
   if (!user) throw new Error("Not signed in");
+  assertId(documentId, "document");
+  force = force === true;
 
   const document = await db.document.findFirst({
     where: { id: documentId, workspace: { ownerId: user.id } },
@@ -43,7 +46,7 @@ export async function getOrGenerateSummary(documentId: string, force = false): P
 
   const fullText = document.pages.map((p) => p.text).join("\n\n");
   const analysisService = getDocumentAnalysisService();
-  assertRateLimit(`summarize:${user.id}`, 15, 5 * 60 * 1000);
+  await assertRateLimit(`summarize:${user.id}`, 15, 5 * 60 * 1000);
   const summary = await analysisService.summarize(fullText, document.title);
 
   await db.document.update({
@@ -90,14 +93,15 @@ export async function compareDocuments(documentIds: string[]): Promise<{
   const user = await getOrCreateCurrentUser();
   if (!user) throw new Error("Not signed in");
 
+  documentIds = assertIdList(documentIds, 5, "papers");
   if (documentIds.length < 2 || documentIds.length > 5) {
     throw new Error("Select between 2 and 5 papers to compare");
   }
 
+  await assertRateLimit(`analysis:${user.id}`, 10, 5 * 60 * 1000);
   const papers = await resolvePapersWithSummaries(documentIds);
   if (papers.length < 2) throw new Error("Not enough ready papers among the selection");
 
-  assertRateLimit(`analysis:${user.id}`, 10, 5 * 60 * 1000);
   const analysisService = getDocumentAnalysisService();
   const narrative = await analysisService.compare(papers);
 
@@ -111,13 +115,13 @@ export async function generateResearchGaps(documentIds: string[]): Promise<{
   const user = await getOrCreateCurrentUser();
   if (!user) throw new Error("Not signed in");
 
+  documentIds = assertIdList(documentIds, 6, "papers");
   if (documentIds.length === 0) throw new Error("Select at least one paper");
-  if (documentIds.length > 6) throw new Error("Select at most 6 papers");
 
+  await assertRateLimit(`analysis:${user.id}`, 10, 5 * 60 * 1000);
   const papers = await resolvePapersWithSummaries(documentIds);
   if (papers.length === 0) throw new Error("None of the selected papers are ready yet");
 
-  assertRateLimit(`analysis:${user.id}`, 10, 5 * 60 * 1000);
   const analysisService = getDocumentAnalysisService();
   const markdown = await analysisService.findResearchGaps(papers);
 
@@ -131,13 +135,13 @@ export async function generateLiteratureReview(documentIds: string[]): Promise<{
   const user = await getOrCreateCurrentUser();
   if (!user) throw new Error("Not signed in");
 
+  documentIds = assertIdList(documentIds, 8, "papers");
   if (documentIds.length < 2) throw new Error("Select at least 2 papers for a literature review");
-  if (documentIds.length > 8) throw new Error("Select at most 8 papers");
 
+  await assertRateLimit(`analysis:${user.id}`, 10, 5 * 60 * 1000);
   const papers = await resolvePapersWithSummaries(documentIds);
   if (papers.length < 2) throw new Error("Not enough ready papers among the selection");
 
-  assertRateLimit(`analysis:${user.id}`, 10, 5 * 60 * 1000);
   const analysisService = getDocumentAnalysisService();
   const themes = await analysisService.generateLiteratureReview(papers);
 
@@ -152,11 +156,15 @@ export async function regenerateReviewTheme(
   const user = await getOrCreateCurrentUser();
   if (!user) throw new Error("Not signed in");
 
+  themeTitle = assertText(themeTitle, 200, "section title");
+  paperIds = assertIdList(paperIds, 8, "papers");
+  allDocumentIds = assertIdList(allDocumentIds, 8, "papers");
+
+  await assertRateLimit(`analysis:${user.id}`, 10, 5 * 60 * 1000);
   const papers = await resolvePapersWithSummaries(allDocumentIds);
   const themePapers = papers.filter((p) => paperIds.includes(p.documentId));
   if (themePapers.length === 0) throw new Error("No papers found for this section");
 
-  assertRateLimit(`analysis:${user.id}`, 10, 5 * 60 * 1000);
   const analysisService = getDocumentAnalysisService();
   return analysisService.regenerateThemeText({ title: themeTitle, papers: themePapers });
 }

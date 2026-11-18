@@ -6,6 +6,7 @@ import { getAIService, getEmbeddingService } from "@/lib/ai";
 import { searchChunks } from "@/lib/ai/vector";
 import { assertRateLimit } from "@/lib/rate-limit";
 import type { AIAnswer } from "@/lib/ai/types";
+import { assertId, assertText } from "@/lib/validations";
 
 const MAX_QUESTION_LENGTH = 2000;
 
@@ -13,11 +14,10 @@ export async function askAboutDocument(documentId: string, question: string): Pr
   const user = await getOrCreateCurrentUser();
   if (!user) throw new Error("Not signed in");
 
-  const trimmed = question.trim();
-  if (!trimmed) throw new Error("Ask a question first");
-  if (trimmed.length > MAX_QUESTION_LENGTH) throw new Error(`Keep questions under ${MAX_QUESTION_LENGTH} characters`);
+  assertId(documentId, "document");
+  const trimmed = assertText(question, MAX_QUESTION_LENGTH, "question");
 
-  assertRateLimit(`ask:${user.id}`, 20, 5 * 60 * 1000);
+  await assertRateLimit(`ask:${user.id}`, 20, 5 * 60 * 1000);
 
   const document = await db.document.findFirst({
     where: { id: documentId, workspace: { ownerId: user.id } },

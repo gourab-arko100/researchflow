@@ -14,6 +14,24 @@ import { getEmbeddingService } from "@/lib/ai";
  * Full pipeline: PROCESSING -> EXTRACTING -> INDEXING -> READY, or FAILED
  * with a real error at whichever step broke.
  */
+// Hard caps on what one upload may produce. A small compressed DOCX can
+// expand to an enormous amount of text ("zip bomb"), and every chunk costs
+// an embedding call — these stop a single file from exhausting the server
+// or the Gemini quota.
+const MAX_PAGES = 1000;
+const MAX_TOTAL_CHARS = 2_000_000;
+const MAX_CHUNKS = 2000;
+
+/** Only ever download from Vercel Blob storage — never an arbitrary URL. */
+function isTrustedBlobUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && u.hostname.endsWith(".blob.vercel-storage.com");
+  } catch {
+    return false;
+  }
+}
+
 export async function processDocument(documentId: string): Promise<void> {
   const document = await db.document.findUnique({ where: { id: documentId } });
   if (!document) return;
@@ -27,6 +45,7 @@ export async function processDocument(documentId: string): Promise<void> {
     const kind = extractionKind(document.fileName);
     if (!kind) throw new Error(`Unsupported file type: ${document.fileName}`);
 
+    if (!isTrustedBlobUrl(document.fileUrl)) throw new Error("File location is not trusted");
     const response = await fetch(document.fileUrl);
     if (!response.ok) throw new Error(`Could not fetch uploaded file (${response.status})`);
     const buffer = Buffer.from(await response.arrayBuffer());
@@ -47,6 +66,13 @@ export async function processDocument(documentId: string): Promise<void> {
     if (pages.length === 0) {
       throw new Error("No extractable text found — the file may be a scanned image without OCR");
     }
+    if (pages.length > MAX_PAGES) {
+      throw new Error(`Document has too many pages (max ${MAX_PAGES})`);
+    }
+    const totalChars = pages.reduce((sum, p) => sum + p.length, 0);
+    if (totalChars > MAX_TOTAL_CHARS) {
+      throw new Error("Document contains too much text to process");
+    }
 
     // Replace any pages/chunks from a previous attempt (retry path)
     await db.documentPage.deleteMany({ where: { documentId } });
@@ -64,6 +90,7 @@ export async function processDocument(documentId: string): Promise<void> {
     // --- Indexing: chunk -> embed -> store in pgvector ---
     const chunks = chunkPages(pages.map((text, i) => ({ pageNumber: i + 1, text })));
     if (chunks.length === 0) throw new Error("Extracted text produced no chunks");
+    if (chunks.length > MAX_CHUNKS) throw new Error("Document is too large to index");
 
     const embeddingService = getEmbeddingService();
     const embeddings = await embeddingService.embedBatch(chunks.map((c) => c.text));

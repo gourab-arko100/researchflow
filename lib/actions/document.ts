@@ -5,7 +5,17 @@ import { del, put } from "@vercel/blob";
 import { getOrCreateCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { processDocument } from "@/lib/processing/pipeline";
-import { ACCEPTED_DOCUMENT_TYPES, ACCEPTED_EXTENSIONS, MAX_UPLOAD_BYTES } from "@/lib/validations";
+import { assertRateLimit } from "@/lib/rate-limit";
+import {
+  ACCEPTED_DOCUMENT_TYPES,
+  ACCEPTED_EXTENSIONS,
+  CONTENT_TYPE_FOR_EXT,
+  MAX_DOCUMENTS_PER_USER,
+  MAX_UPLOAD_BYTES,
+  assertId,
+  safeStorageName,
+  sniffFileKind,
+} from "@/lib/validations";
 
 /**
  * Uploads go through our own server (not Vercel Blob's client-upload
@@ -24,7 +34,18 @@ export async function uploadDocument(formData: FormData): Promise<{ id?: string;
   const file = formData.get("file");
 
   if (typeof workspaceId !== "string" || !workspaceId) return { error: "Missing workspace" };
+  try {
+    assertId(workspaceId, "workspace");
+  } catch {
+    return { error: "Invalid workspace" };
+  }
   if (!(file instanceof File)) return { error: "No file provided" };
+
+  try {
+    await assertRateLimit(`upload:${user.id}`, 20, 60 * 60 * 1000); // 20 uploads / hour
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Too many uploads" };
+  }
 
   const ext = "." + file.name.split(".").pop()?.toLowerCase();
   if (!ACCEPTED_EXTENSIONS.includes(ext)) {
@@ -45,16 +66,35 @@ export async function uploadDocument(formData: FormData): Promise<{ id?: string;
   });
   if (!workspace) return { error: "Workspace not found" };
 
-  const blob = await put(file.name, file, { access: "public", addRandomSuffix: true });
+  const documentCount = await db.document.count({ where: { workspace: { ownerId: user.id } } });
+  if (documentCount >= MAX_DOCUMENTS_PER_USER) {
+    return { error: `You've reached the limit of ${MAX_DOCUMENTS_PER_USER} papers — delete some to upload more` };
+  }
+
+  // Check the real file contents, not just the name the browser sent.
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (!sniffFileKind(bytes, ext)) {
+    return { error: `This file doesn't look like a real ${ext.slice(1).toUpperCase()} file` };
+  }
+
+  // Stored under a sanitized name with a random suffix and an explicit,
+  // safe content type — never the name/type the browser claimed.
+  const blob = await put(safeStorageName(file.name, ext), Buffer.from(bytes), {
+    access: "public",
+    addRandomSuffix: true,
+    contentType: CONTENT_TYPE_FOR_EXT[ext],
+  });
+
+  const displayName = file.name.slice(0, 200);
 
   const document = await db.document.create({
     data: {
       workspaceId: workspace.id,
-      title: file.name.replace(/\.(pdf|txt|docx)$/i, ""),
+      title: displayName.replace(/\.(pdf|txt|docx)$/i, ""),
       authors: [],
       keywords: [],
       fileUrl: blob.url,
-      fileName: file.name,
+      fileName: displayName,
       fileSizeBytes: file.size,
       status: "PROCESSING",
     },
@@ -72,11 +112,16 @@ export async function uploadDocument(formData: FormData): Promise<{ id?: string;
 export async function retryProcessing(documentId: string) {
   const user = await getOrCreateCurrentUser();
   if (!user) throw new Error("Not signed in");
+  assertId(documentId, "document");
 
   const document = await db.document.findFirst({
     where: { id: documentId, workspace: { ownerId: user.id } },
   });
   if (!document) throw new Error("Document not found");
+  if (document.status === "READY") return; // nothing to retry — avoid paying for re-indexing
+
+  // Re-processing re-runs embeddings (real API cost), so it shares the upload budget.
+  await assertRateLimit(`upload:${user.id}`, 20, 60 * 60 * 1000);
 
   await processDocument(documentId);
   revalidatePath(`/workspace/${document.workspaceId}`);
@@ -85,6 +130,7 @@ export async function retryProcessing(documentId: string) {
 export async function deleteDocument(documentId: string) {
   const user = await getOrCreateCurrentUser();
   if (!user) throw new Error("Not signed in");
+  assertId(documentId, "document");
 
   const document = await db.document.findFirst({
     where: { id: documentId, workspace: { ownerId: user.id } },

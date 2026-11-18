@@ -7,6 +7,7 @@ import { searchChunks } from "@/lib/ai/vector";
 import { ensureDemoWorkspace, DEMO_WORKSPACE_ID } from "@/lib/demo/seed";
 import { assertRateLimit, getClientIp } from "@/lib/rate-limit";
 import type { AIAnswer } from "@/lib/ai/types";
+import { assertId, assertIdList, assertText } from "@/lib/validations";
 
 // No auth check anywhere in this file — these are the only server actions in
 // the app that intentionally run for signed-out visitors. Every query below
@@ -22,6 +23,7 @@ export async function getDemoWorkspace() {
 }
 
 export async function getDemoDocument(documentId: string) {
+  assertId(documentId, "document");
   await ensureDemoWorkspace();
   return db.document.findFirst({
     where: { id: documentId, workspaceId: DEMO_WORKSPACE_ID },
@@ -30,17 +32,18 @@ export async function getDemoDocument(documentId: string) {
 }
 
 export async function askDemoQuestion(documentIds: string[], question: string): Promise<AIAnswer> {
-  await ensureDemoWorkspace();
+  const trimmed = assertText(question, 2000, "question");
+  documentIds = assertIdList(documentIds, 10, "papers");
 
-  const trimmed = question.trim();
-  if (!trimmed) throw new Error("Ask a question first");
-  if (trimmed.length > 2000) throw new Error("Keep questions under 2000 characters");
+  // Rate-limit before touching the database at all.
+  const ipForLimit = await getClientIp();
+  await assertRateLimit(`demo:${ipForLimit}`, 20, 5 * 60 * 1000);
+
+  await ensureDemoWorkspace();
 
   // IP-based since there's no user account here — this is the one public,
   // unauthenticated entry point in the app, and it's cheap (Demo providers,
   // no real API cost) but still worth capping against abuse of the DB.
-  const ip = await getClientIp();
-  assertRateLimit(`demo:${ip}`, 20, 5 * 60 * 1000);
 
   const validDocs = await db.document.findMany({
     where: { id: { in: documentIds }, workspaceId: DEMO_WORKSPACE_ID },
