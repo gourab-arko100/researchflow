@@ -77,11 +77,6 @@ Full detail in `prisma/schema.prisma`; the shape:
 - **Collection** / **CollectionDocument** exist in the schema for paper
   organization beyond workspaces but have no UI yet — see Future improvements
 
-## Screenshots
-
-_Add screenshots here once deployed — suggested set: landing page, dashboard,
-document reader with an open citation, chat with multi-paper citations,
-comparison table, and the public demo workspace._
 
 ## Design system
 
